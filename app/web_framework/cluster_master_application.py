@@ -431,4 +431,15 @@ class _SlavesHeartbeatHandler(_ClusterMasterBaseAPIHandler):
     @authenticated
     def post(self, slave_id):
         slave = SlaveRegistry.singleton().get_slave(slave_id=int(slave_id))
-        self._cluster_master.update_slave_last_heartbeat_time(slave)
+
+        # If the slave has been marked dead, but still sends heartbeat, the master does not update the last heartbeat
+        # time and the method returns false. Additionally, master responds with a HTTP 4XX error code through which
+        # slave understands that it has been marked dead. The slave will treat this as a heartbeat failure, and die.
+        #
+        # The reason master returns error instead of simply marking the slave as alive is because the master or slave
+        # do not maintain an explicit state about when and why the slave was marked dead. It is a lot cleaner for
+        # the heartbeat functionality to indicate an heartbeat failure and let the slave make a decision based on that.
+        if not self._cluster_master.update_slave_last_heartbeat_time(slave):
+            # HTTP 450 is currently an unassigned error code. It was chosen because the existing error codes do not
+            # correctly capture this failure situation
+            self._write_status(status_code=450)
